@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlops-production-pipeline"
+description = "Dependency-light ML lifecycle building blocks: deterministic linear regression, held-out MAE, quality gates and PSI drift."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+dev = ["pytest>=9.1.1,<10","ruff>=0.16.7,<1"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
