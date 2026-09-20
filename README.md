@@ -1,6 +1,8 @@
 # MLOps Production Pipeline
 
-[Live Interactive Demo](https://maharshimak.github.io/makma-ai-os/projects/mlops-production-pipeline/) · [AI Systems Lab](https://maharshimak.github.io/makma-ai-os/projects/)
+**A MAK'MA Studio Product · MAK'MA Labs**
+
+[Live Product Demo](https://maharshimak.github.io/makma-ai-os/projects/mlops-production-pipeline/) · [MAK'MA Labs](https://maharshimak.github.io/makma-ai-os/projects/)
 
 Dependency-light ML lifecycle building blocks: deterministic linear regression, held-out MAE, quality gates and PSI drift.
 
