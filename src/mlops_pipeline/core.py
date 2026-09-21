@@ -19,7 +19,10 @@ def train(xs: list[float], ys: list[float], version: str = "0.1.0") -> LinearMod
     if denom == 0:
         raise ValueError("Feature variance must be non-zero.")
     slope = sum((x - x_bar) * (y - y_bar) for x, y in zip(xs, ys)) / denom
-    return LinearModel(slope=slope, intercept=y_bar - slope * x_bar, version=version)
+    intercept = y_bar - slope * x_bar
+    if not isfinite(slope) or not isfinite(intercept):
+        raise ValueError("Training produced non-finite model coefficients.")
+    return LinearModel(slope=slope, intercept=intercept, version=version)
 
 
 def predict(model: LinearModel, x: float) -> float:
@@ -45,7 +48,12 @@ def psi(expected: list[float], actual: list[float], epsilon: float = 1e-6) -> fl
         raise ValueError("epsilon must be finite and positive.")
     if any(not isfinite(v) or v < 0 for v in [*expected, *actual]):
         raise ValueError("Bin counts must be finite and non-negative.")
-    if sum(expected) <= 0 or sum(actual) <= 0:
+    if (
+        not isfinite(sum(expected))
+        or not isfinite(sum(actual))
+        or sum(expected) <= 0
+        or sum(actual) <= 0
+    ):
         raise ValueError("Distribution totals must be positive.")
     expected = [v / sum(expected) for v in expected]
     actual = [v / sum(actual) for v in actual]

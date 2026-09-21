@@ -6,6 +6,28 @@
 
 Dependency-light ML lifecycle building blocks: deterministic linear regression, held-out MAE, quality gates and PSI drift.
 
+
+## Product contract — engineering upgrade
+
+**Problem and audience:** A compact reproducible train/evaluate/integrity/deployment-gate workflow for ML engineering education and regression checks.
+
+**Live tool:** https://maharshimak.github.io/makma-ai-os/projects/mlops-production-pipeline/
+
+**Implemented browser workflow:** Editable training/held-out pairs, OLS coefficients, prediction errors/MAE, normalized PSI, exact UTF-8 artifact hashing, tamper controls and a gate combining sample count, error, drift and integrity. Edits invalidate verification until checked again.
+
+**Backend and parity contract:** Python deployment_gate now accepts integrity_valid; false blocks deployment even when quality passes. PSI rejects overflowing totals and training rejects non-finite coefficients. Shared OLS/PSI and exact payload digest fixtures protect browser/Python equivalence. Python model_fingerprint serializes Python floats; byte hashes only match when exact serialization matches.
+
+**Architecture:** `makma-ai-os/demo` is the shared web product source and Pages deployment. This repository owns its Python domain package. The central `tests/e2e` suite exercises all nine products; `tests/fixtures/python-parity.json` plus `scripts/generate_parity.py` guard shared mathematical contracts. Backend revisions used for regeneration are pinned in the central `backend-lock.json`.
+
+**Safety and limitations:** One-feature OLS only; no automated deployment, experiment tracking server or signed artifact registry. A digest checks bytes against a reference, not the trustworthiness of that reference. Inputs are validated, rendered user values are escaped, and deterministic results are not presented as model inference.
+
+**Verification:** Run `python -m ruff check .` and `python -m pytest -q`. `tests/test_engineering_upgrade.py` protects the new rejection/correctness paths. Central web checks: `npm ci`, `npm test`, `npm run build`, `npx playwright install --with-deps chromium`, `npm run test:e2e`. CI gates publishing on browser interactions and validates all public URLs after deployment.
+
+**Highest-value next work:** Trusted signed manifests, dataset versioning and CI deployment integrations.
+
+**Provenance:** Independent MAK’MA Studio engineering implementation; examples are synthetic and no employer code or data is included. Existing MIT license applies.
+
+
 ## Implemented now
 
 - One-feature ordinary least-squares training with finite-data and variance checks.

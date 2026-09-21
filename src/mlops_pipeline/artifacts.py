@@ -62,13 +62,18 @@ def deployment_gate(
     max_mae: float,
     max_psi: float,
     min_eval_rows: int = 20,
+    integrity_valid: bool = True,
 ) -> DeploymentDecision:
     if not isfinite(max_mae) or max_mae < 0 or not isfinite(max_psi) or max_psi < 0:
         raise ValueError("quality thresholds must be finite and non-negative")
     if isinstance(min_eval_rows, bool) or not isinstance(min_eval_rows, int) or min_eval_rows <= 0:
         raise ValueError("min_eval_rows must be a positive integer")
 
+    if type(integrity_valid) is not bool:
+        raise ValueError("integrity_valid must be boolean")
     reasons: list[str] = []
+    if not integrity_valid:
+        reasons.append("artifact integrity verification failed")
     if manifest.eval_rows < min_eval_rows:
         reasons.append(f"eval_rows {manifest.eval_rows} < required {min_eval_rows}")
     if manifest.mae > max_mae:
