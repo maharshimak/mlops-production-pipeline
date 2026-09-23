@@ -28,9 +28,16 @@ class TabularPipelineRun:
     eval_indices: tuple[int, ...]
 
 
-def _validate_matrix(features: list[list[float]], targets: list[float]) -> int:
-    if len(features) != len(targets) or len(features) < 4:
-        raise ValueError("Need at least four feature rows paired with targets.")
+def _validate_matrix(
+    features: list[list[float]],
+    targets: list[float],
+    *,
+    min_rows: int = 1,
+) -> int:
+    if isinstance(min_rows, bool) or not isinstance(min_rows, int) or min_rows < 1:
+        raise ValueError("min_rows must be a positive integer.")
+    if len(features) != len(targets) or len(features) < min_rows:
+        raise ValueError(f"Need at least {min_rows} feature rows paired with targets.")
     if not features or not features[0]:
         raise ValueError("Feature matrix must contain at least one feature.")
     width = len(features[0])
@@ -76,7 +83,7 @@ def train_tabular(
     version: str = "1.0.0",
     ridge: float = 1e-8,
 ) -> TabularLinearModel:
-    width = _validate_matrix(features, targets)
+    width = _validate_matrix(features, targets, min_rows=4)
     if type(ridge) not in (int, float) or not isfinite(ridge) or ridge < 0:
         raise ValueError("ridge must be finite and non-negative.")
 
@@ -143,7 +150,7 @@ def tabular_mae(
     features: list[list[float]],
     targets: list[float],
 ) -> float:
-    _validate_matrix(features, targets)
+    _validate_matrix(features, targets, min_rows=1)
     return sum(
         abs(predict_tabular(model, row) - target)
         for row, target in zip(features, targets, strict=True)
@@ -171,7 +178,7 @@ def run_tabular_regression_pipeline(
     ridge: float = 1e-8,
     max_mae: float = 1.0,
 ) -> TabularPipelineRun:
-    _validate_matrix(features, targets)
+    _validate_matrix(features, targets, min_rows=4)
     if not 0.1 <= eval_fraction <= 0.5:
         raise ValueError("eval_fraction must be between 0.1 and 0.5.")
     if isinstance(seed, bool) or not isinstance(seed, int):
