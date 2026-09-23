@@ -64,7 +64,7 @@ def run_regression_pipeline(
     if not 0.1 <= eval_fraction <= 0.5:
         raise ValueError("eval_fraction must be between 0.1 and 0.5.")
     if isinstance(seed, bool) or not isinstance(seed, int):
-        raise ValueError("seed must be an integer.")
+        raise TypeError("seed must be an integer.")
 
     indices = list(range(len(xs)))
     random.Random(seed).shuffle(indices)
