@@ -4,7 +4,7 @@
 
 [Live Product Demo](https://maharshimak.github.io/makma-ai-os/projects/mlops-production-pipeline/) · [MAK'MA Labs](https://maharshimak.github.io/makma-ai-os/projects/)
 
-Dependency-light ML lifecycle building blocks: deterministic linear regression, held-out MAE, quality gates and PSI drift.
+Dependency-light ML lifecycle building blocks: deterministic single- and multi-feature linear regression, held-out MAE, quality gates, reproducibility fingerprints and PSI drift.
 
 
 ## Product contract — engineering upgrade
@@ -39,6 +39,10 @@ Dependency-light ML lifecycle building blocks: deterministic linear regression, 
 ## Scope and limitations
 
 This remains a compact reproducible ML pipeline library rather than a production serving/deployment platform. The implemented training model is still univariate OLS, but `run_regression_pipeline` now performs a deterministic seeded split, held-out evaluation, train/eval drift measurement, dataset/config fingerprinting, reproducible artifact serialization and a quality/integrity deployment decision. There is no external dataset service, model registry, artifact store, online serving, monitoring collector or automated infrastructure deployment.
+
+## Multi-feature pipeline
+
+In addition to the original dependency-light single-feature baseline, `run_tabular_regression_pipeline` now supports multiple numeric features with feature normalization, ridge-stabilized linear regression, deterministic train/eval splits, held-out MAE and dataset/config/artifact fingerprints. The simpler baseline remains available for parity and educational inspection.
 
 ## Installation and development
 
