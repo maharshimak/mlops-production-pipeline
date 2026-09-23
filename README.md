@@ -33,10 +33,12 @@ Dependency-light ML lifecycle building blocks: deterministic linear regression, 
 - One-feature ordinary least-squares training with finite-data and variance checks.
 - Prediction, mean absolute error and fail-closed quality threshold checks.
 - Versioned coefficient dataclass and PSI over normalized non-negative bin counts.
+- Deterministic seeded train/evaluation splitting with held-out MAE and measured train/eval PSI.
+- Dataset and configuration SHA-256 fingerprints, reproducible model artifact payload and deployment-gate result.
 
 ## Scope and limitations
 
-Despite the repository name, this is a compact educational library, not a production deployment system. Training is univariate regression. Model metadata contains version and coefficients only. There is no dataset splitting service, model registry, artifact storage, online serving, monitoring collector or automated deployment. PSI needs consistent caller-defined bins.
+This remains a compact reproducible ML pipeline library rather than a production serving/deployment platform. The implemented training model is still univariate OLS, but `run_regression_pipeline` now performs a deterministic seeded split, held-out evaluation, train/eval drift measurement, dataset/config fingerprinting, reproducible artifact serialization and a quality/integrity deployment decision. There is no external dataset service, model registry, artifact store, online serving, monitoring collector or automated infrastructure deployment.
 
 ## Installation and development
 
@@ -86,7 +88,7 @@ docker run --rm mlops-production-pipeline
 
 ## Next engineering work
 
-Dataset fingerprints; serialized artifacts and provenance; explicit train/validation/test splitting; reproducible pipeline command; deployment and monitoring adapters. These are planned work, not current capabilities.
+Multivariate/classification estimators; file-backed dataset loaders; persisted artifact/manifests; explicit train/validation/test modes; CLI pipeline execution; control-plane registration; deployment and monitoring adapters. These are planned work, not current capabilities.
 
 ## Contributing and security
 
