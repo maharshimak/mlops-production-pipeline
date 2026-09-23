@@ -22,6 +22,6 @@ __all__ = [
     "run_regression_pipeline",
     "run_tabular_regression_pipeline",
     "tabular_mae",
-    "train_tabular",
     "train",
+    "train_tabular",
 ]
