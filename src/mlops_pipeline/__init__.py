@@ -1,6 +1,5 @@
 from .core import LinearModel, mae, predict, psi, quality_gate, train
 from .pipeline import PipelineRun, run_regression_pipeline
-from .tracking import SQLiteRunLedger, TrackedRun
 from .tabular import (
     TabularLinearModel,
     TabularPipelineRun,
@@ -9,12 +8,13 @@ from .tabular import (
     tabular_mae,
     train_tabular,
 )
+from .tracking import SQLiteRunLedger, TrackedRun
 
 __all__ = [
     "LinearModel",
     "PipelineRun",
-    "TabularLinearModel",
     "SQLiteRunLedger",
+    "TabularLinearModel",
     "TabularPipelineRun",
     "TrackedRun",
     "mae",
