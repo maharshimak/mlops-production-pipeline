@@ -23,6 +23,8 @@ Dependency-light ML lifecycle building blocks: deterministic single- and multi-f
 
 **Verification:** Run `python -m ruff check .` and `python -m pytest -q`. `tests/test_engineering_upgrade.py` protects the new rejection/correctness paths. Central web checks: `npm ci`, `npm test`, `npm run build`, `npx playwright install --with-deps chromium`, `npm run test:e2e`. CI gates publishing on browser interactions and validates all public URLs after deployment.
 
+**Durable experiment tracking:** `SQLiteRunLedger` records run identity, dataset/config fingerprints, parameters, MAE/PSI metrics, artifact references and terminal status. `run_regression_pipeline` can write directly to this ledger so tracking is tied to the actual training run rather than a separate demo.
+
 **Highest-value next work:** Trusted signed manifests, dataset versioning and CI deployment integrations.
 
 **Provenance:** Independent MAK’MA Studio engineering implementation; examples are synthetic and no employer code or data is included. Existing MIT license applies.
