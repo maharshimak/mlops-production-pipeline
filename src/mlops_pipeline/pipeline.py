@@ -13,6 +13,7 @@ from mlops_pipeline.artifacts import (
     deployment_gate,
 )
 from mlops_pipeline.core import LinearModel, mae, psi, train
+from mlops_pipeline.tracking import SQLiteRunLedger
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class PipelineRun:
     artifact_payload: str
     train_indices: tuple[int, ...]
     eval_indices: tuple[int, ...]
+    tracking_run_id: str | None = None
 
 
 def _fingerprint(value: object) -> str:
@@ -58,6 +60,8 @@ def run_regression_pipeline(
     seed: int = 42,
     max_mae: float = 1.0,
     max_psi: float = 0.25,
+    ledger: SQLiteRunLedger | None = None,
+    run_name: str = "regression-pipeline",
 ) -> PipelineRun:
     if len(xs) != len(ys) or len(xs) < 6:
         raise ValueError("Pipeline requires at least six paired observations.")
@@ -125,6 +129,37 @@ def run_regression_pipeline(
         separators=(",", ":"),
     )
 
+    tracking_run_id: str | None = None
+    if ledger is not None:
+        tracking_run_id = ledger.start_run(
+            run_name,
+            dataset_fingerprint=dataset_fingerprint,
+            config_fingerprint=config_fingerprint,
+            params={
+                "version": version,
+                "eval_fraction": eval_fraction,
+                "seed": seed,
+                "max_mae": max_mae,
+                "max_psi": max_psi,
+            },
+        )
+        try:
+            ledger.log_metric(tracking_run_id, "mae", eval_mae)
+            ledger.log_metric(tracking_run_id, "psi", drift_psi)
+            artifact_digest = sha256(artifact_payload.encode()).hexdigest()
+            ledger.log_artifact(
+                tracking_run_id,
+                "model",
+                f"sha256:{artifact_digest}",
+            )
+            ledger.finish_run(
+                tracking_run_id,
+                status="succeeded" if decision.allowed else "failed",
+            )
+        except Exception:
+            ledger.finish_run(tracking_run_id, status="failed")
+            raise
+
     return PipelineRun(
         model=model,
         manifest=manifest,
@@ -134,4 +169,5 @@ def run_regression_pipeline(
         artifact_payload=artifact_payload,
         train_indices=train_indices,
         eval_indices=eval_indices,
+        tracking_run_id=tracking_run_id,
     )
