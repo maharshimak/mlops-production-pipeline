@@ -8,12 +8,15 @@ from .tabular import (
     tabular_mae,
     train_tabular,
 )
+from .tracking import SQLiteRunLedger, TrackedRun
 
 __all__ = [
     "LinearModel",
     "PipelineRun",
+    "SQLiteRunLedger",
     "TabularLinearModel",
     "TabularPipelineRun",
+    "TrackedRun",
     "mae",
     "predict",
     "predict_tabular",
