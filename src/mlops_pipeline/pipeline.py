@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import random
+import tempfile
 from dataclasses import dataclass
 from hashlib import sha256
 from math import ceil
+from pathlib import Path
 
 from mlops_pipeline.artifacts import (
     DeploymentDecision,
@@ -13,6 +15,7 @@ from mlops_pipeline.artifacts import (
     deployment_gate,
 )
 from mlops_pipeline.core import LinearModel, mae, psi, train
+from mlops_pipeline.integrity import build_integrity_manifest, verify_integrity_manifest
 from mlops_pipeline.tracking import SQLiteRunLedger
 
 
@@ -99,14 +102,6 @@ def run_regression_pipeline(
         mae=eval_mae,
         drift_psi=drift_psi,
     )
-    decision = deployment_gate(
-        manifest,
-        max_mae=max_mae,
-        max_psi=max_psi,
-        min_eval_rows=2,
-        integrity_valid=True,
-    )
-
     dataset_fingerprint = _fingerprint(list(zip(xs, ys, strict=True)))
     config_fingerprint = _fingerprint(
         {
@@ -127,6 +122,22 @@ def run_regression_pipeline(
         },
         sort_keys=True,
         separators=(",", ":"),
+    )
+
+    # The deployment decision is now based on a real byte-level verification of
+    # the serialized artifact rather than a hard-coded integrity_valid=True.
+    with tempfile.TemporaryDirectory(prefix="mlops-pipeline-integrity-") as temp_dir:
+        artifact_path = Path(temp_dir) / "model.json"
+        artifact_path.write_text(artifact_payload, encoding="utf-8")
+        integrity_manifest = build_integrity_manifest(temp_dir, ["model.json"])
+        integrity_valid = verify_integrity_manifest(temp_dir, integrity_manifest).valid
+
+    decision = deployment_gate(
+        manifest,
+        max_mae=max_mae,
+        max_psi=max_psi,
+        min_eval_rows=2,
+        integrity_valid=integrity_valid,
     )
 
     tracking_run_id: str | None = None
