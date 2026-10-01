@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 import random
 import tempfile
-from pathlib import Path
 from dataclasses import dataclass
 from hashlib import sha256
 from math import ceil
+from pathlib import Path
 
 from mlops_pipeline.artifacts import (
     DeploymentDecision,
