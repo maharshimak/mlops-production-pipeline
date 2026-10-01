@@ -63,6 +63,7 @@ def run_regression_pipeline(
     seed: int = 42,
     max_mae: float = 1.0,
     max_psi: float = 0.25,
+    min_eval_rows: int = 5,
     ledger: SQLiteRunLedger | None = None,
     run_name: str = "regression-pipeline",
 ) -> PipelineRun:
@@ -72,6 +73,10 @@ def run_regression_pipeline(
         raise ValueError("eval_fraction must be between 0.1 and 0.5.")
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer.")
+    if isinstance(min_eval_rows, bool) or not isinstance(min_eval_rows, int):
+        raise TypeError("min_eval_rows must be an integer.")
+    if min_eval_rows <= 0:
+        raise ValueError("min_eval_rows must be positive.")
 
     indices = list(range(len(xs)))
     random.Random(seed).shuffle(indices)
@@ -89,8 +94,10 @@ def run_regression_pipeline(
     model = train(train_x, train_y, version=version)
     eval_mae = mae(model, eval_x, eval_y)
 
-    minimum = min(xs)
-    maximum = max(xs)
+    # Histogram boundaries are fitted only on the training/reference split.
+    # Evaluation observations are projected into those frozen bins.
+    minimum = min(train_x)
+    maximum = max(train_x)
     train_hist = _histogram(train_x, minimum, maximum)
     eval_hist = _histogram(eval_x, minimum, maximum)
     drift_psi = psi(train_hist, eval_hist)
@@ -110,6 +117,7 @@ def run_regression_pipeline(
             "seed": seed,
             "max_mae": max_mae,
             "max_psi": max_psi,
+            "min_eval_rows": min_eval_rows,
         }
     )
     artifact_payload = json.dumps(
@@ -136,7 +144,7 @@ def run_regression_pipeline(
         manifest,
         max_mae=max_mae,
         max_psi=max_psi,
-        min_eval_rows=2,
+        min_eval_rows=min_eval_rows,
         integrity_valid=integrity_valid,
     )
 
@@ -152,6 +160,7 @@ def run_regression_pipeline(
                 "seed": seed,
                 "max_mae": max_mae,
                 "max_psi": max_psi,
+                "min_eval_rows": min_eval_rows,
             },
         )
         try:
