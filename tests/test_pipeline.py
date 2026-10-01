@@ -35,3 +35,29 @@ def test_pipeline_rejects_tiny_datasets() -> None:
         assert "six" in str(error)
     else:
         raise AssertionError("tiny dataset should be rejected")
+
+
+
+def test_default_gate_requires_meaningful_evaluation_sample():
+    xs = [float(value) for value in range(1, 13)]
+    ys = [2.0 * value for value in xs]
+
+    run = run_regression_pipeline(xs, ys, max_mae=0.01, max_psi=10.0)
+
+    assert run.manifest.eval_rows < 5
+    assert run.decision.allowed is False
+    assert any("eval_rows" in reason for reason in run.decision.reasons)
+
+
+def test_eval_gate_threshold_is_part_of_reproducibility_config():
+    xs = [float(value) for value in range(1, 25)]
+    ys = [2.0 * value for value in xs]
+
+    loose = run_regression_pipeline(
+        xs, ys, max_psi=10.0, min_eval_rows=2
+    )
+    strict = run_regression_pipeline(
+        xs, ys, max_psi=10.0, min_eval_rows=5
+    )
+
+    assert loose.config_fingerprint != strict.config_fingerprint
