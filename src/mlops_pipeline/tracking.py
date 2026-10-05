@@ -138,10 +138,7 @@ class SQLiteRunLedger:
         )
         if cursor.rowcount != 1:
             self.connection.rollback()
-            try:
-                run = self.get_run(run_id)
-            except KeyError:
-                raise
+            run = self.get_run(run_id)
             raise ValueError(
                 f"Run {run_id} is already terminal with status {run.status}."
             )
