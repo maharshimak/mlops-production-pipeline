@@ -170,17 +170,8 @@ class SQLiteRunLedger:
             )
         self.connection.commit()
 
-    def get_run(self, run_id: str) -> TrackedRun:
-        row = self.connection.execute(
-            """
-            SELECT run_id, name, status, dataset_fingerprint, config_fingerprint,
-                   params_json, metrics_json, artifacts_json
-            FROM runs WHERE run_id = ?
-            """,
-            (run_id,),
-        ).fetchone()
-        if row is None:
-            raise KeyError(f"Unknown run: {run_id}")
+    @staticmethod
+    def _render_run(row: sqlite3.Row) -> TrackedRun:
         return TrackedRun(
             run_id=row["run_id"],
             name=row["name"],
@@ -194,6 +185,55 @@ class SQLiteRunLedger:
             },
             artifacts=json.loads(row["artifacts_json"]),
         )
+
+    def get_run(self, run_id: str) -> TrackedRun:
+        row = self.connection.execute(
+            """
+            SELECT run_id, name, status, dataset_fingerprint, config_fingerprint,
+                   params_json, metrics_json, artifacts_json
+            FROM runs WHERE run_id = ?
+            """,
+            (run_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"Unknown run: {run_id}")
+        return self._render_run(row)
+
+    def list_runs(
+        self,
+        *,
+        name: str | None = None,
+        limit: int = 100,
+    ) -> list[TrackedRun]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be an integer between 1 and 1000.")
+        if name is not None and (not isinstance(name, str) or not name.strip()):
+            raise ValueError("name must be non-empty when provided.")
+
+        if name is None:
+            rows = self.connection.execute(
+                """
+                SELECT run_id, name, status, dataset_fingerprint, config_fingerprint,
+                       params_json, metrics_json, artifacts_json
+                FROM runs
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                """
+                SELECT run_id, name, status, dataset_fingerprint, config_fingerprint,
+                       params_json, metrics_json, artifacts_json
+                FROM runs
+                WHERE name = ?
+                ORDER BY created_at DESC, rowid DESC
+                LIMIT ?
+                """,
+                (name, limit),
+            ).fetchall()
+        return [self._render_run(row) for row in rows]
 
     def close(self) -> None:
         self.connection.close()
