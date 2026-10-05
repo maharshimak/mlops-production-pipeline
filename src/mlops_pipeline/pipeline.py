@@ -15,6 +15,7 @@ from mlops_pipeline.artifacts import (
     deployment_gate,
 )
 from mlops_pipeline.core import LinearModel, mae, psi, train
+from mlops_pipeline.cross_validation import CrossValidationResult, kfold_regression_cv
 from mlops_pipeline.integrity import build_integrity_manifest, verify_integrity_manifest
 from mlops_pipeline.tracking import SQLiteRunLedger
 
@@ -29,6 +30,7 @@ class PipelineRun:
     artifact_payload: str
     train_indices: tuple[int, ...]
     eval_indices: tuple[int, ...]
+    cross_validation: CrossValidationResult
     tracking_run_id: str | None = None
 
 
@@ -64,6 +66,8 @@ def run_regression_pipeline(
     max_mae: float = 1.0,
     max_psi: float = 0.25,
     min_eval_rows: int = 5,
+    cv_folds: int = 5,
+    max_cv_worst_mae: float | None = None,
     ledger: SQLiteRunLedger | None = None,
     run_name: str = "regression-pipeline",
 ) -> PipelineRun:
@@ -77,6 +81,9 @@ def run_regression_pipeline(
         raise TypeError("min_eval_rows must be an integer.")
     if min_eval_rows <= 0:
         raise ValueError("min_eval_rows must be positive.")
+    if isinstance(cv_folds, bool) or not isinstance(cv_folds, int) or cv_folds < 2:
+        raise ValueError("cv_folds must be an integer >= 2.")
+    effective_cv_threshold = max_mae if max_cv_worst_mae is None else max_cv_worst_mae
 
     indices = list(range(len(xs)))
     random.Random(seed).shuffle(indices)
@@ -93,6 +100,12 @@ def run_regression_pipeline(
 
     model = train(train_x, train_y, version=version)
     eval_mae = mae(model, eval_x, eval_y)
+    cross_validation = kfold_regression_cv(
+        [[value] for value in xs],
+        ys,
+        folds=cv_folds,
+        seed=seed,
+    )
 
     # Histogram boundaries are fitted only on the training/reference split.
     # Evaluation observations are projected into those frozen bins.
@@ -108,6 +121,8 @@ def run_regression_pipeline(
         eval_rows=len(eval_indices),
         mae=eval_mae,
         drift_psi=drift_psi,
+        cv_mean_mae=cross_validation.mean_mae,
+        cv_worst_mae=cross_validation.worst_mae,
     )
     dataset_fingerprint = _fingerprint(list(zip(xs, ys, strict=True)))
     config_fingerprint = _fingerprint(
@@ -118,6 +133,8 @@ def run_regression_pipeline(
             "max_mae": max_mae,
             "max_psi": max_psi,
             "min_eval_rows": min_eval_rows,
+            "cv_folds": cv_folds,
+            "max_cv_worst_mae": effective_cv_threshold,
         }
     )
     artifact_payload = json.dumps(
@@ -146,6 +163,7 @@ def run_regression_pipeline(
         max_psi=max_psi,
         min_eval_rows=min_eval_rows,
         integrity_valid=integrity_valid,
+        max_cv_worst_mae=effective_cv_threshold,
     )
 
     tracking_run_id: str | None = None
@@ -161,11 +179,23 @@ def run_regression_pipeline(
                 "max_mae": max_mae,
                 "max_psi": max_psi,
                 "min_eval_rows": min_eval_rows,
+                "cv_folds": cv_folds,
+                "max_cv_worst_mae": effective_cv_threshold,
             },
         )
         try:
             ledger.log_metric(tracking_run_id, "mae", eval_mae)
             ledger.log_metric(tracking_run_id, "psi", drift_psi)
+            ledger.log_metric(
+                tracking_run_id,
+                "cv_mean_mae",
+                cross_validation.mean_mae,
+            )
+            ledger.log_metric(
+                tracking_run_id,
+                "cv_worst_mae",
+                cross_validation.worst_mae,
+            )
             artifact_digest = sha256(artifact_payload.encode()).hexdigest()
             ledger.log_artifact(
                 tracking_run_id,
@@ -189,5 +219,6 @@ def run_regression_pipeline(
         artifact_payload=artifact_payload,
         train_indices=train_indices,
         eval_indices=eval_indices,
+        cross_validation=cross_validation,
         tracking_run_id=tracking_run_id,
     )

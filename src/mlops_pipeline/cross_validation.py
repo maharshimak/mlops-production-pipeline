@@ -38,8 +38,8 @@ def kfold_regression_cv(
         raise ValueError("folds must be an integer >= 2")
     if folds > len(features):
         raise ValueError("folds cannot exceed the number of rows")
-    if len(features) - ((len(features) + folds - 1) // folds) < 3:
-        raise ValueError("each training split must contain at least three rows")
+    if len(features) - ((len(features) + folds - 1) // folds) < 4:
+        raise ValueError("each training split must contain at least four rows")
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise TypeError("seed must be an integer")
 

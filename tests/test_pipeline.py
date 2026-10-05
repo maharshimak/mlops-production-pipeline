@@ -61,3 +61,42 @@ def test_eval_gate_threshold_is_part_of_reproducibility_config():
     )
 
     assert loose.config_fingerprint != strict.config_fingerprint
+
+
+def test_pipeline_manifest_includes_cross_validation_stability() -> None:
+    xs = [float(value) for value in range(1, 31)]
+    ys = [2.0 * value + 1.0 for value in xs]
+
+    run = run_regression_pipeline(
+        xs,
+        ys,
+        seed=11,
+        max_mae=0.01,
+        max_psi=10.0,
+        min_eval_rows=5,
+    )
+
+    assert run.manifest.cv_mean_mae is not None
+    assert run.manifest.cv_worst_mae is not None
+    assert run.manifest.cv_worst_mae < 0.01
+    assert run.decision.allowed
+
+
+def test_pipeline_blocks_unstable_cross_validation_even_if_holdout_is_permitted() -> None:
+    xs = [float(value) for value in range(1, 31)]
+    ys = [2.0 * value + 1.0 for value in xs]
+    ys[7] += 20.0
+    ys[18] -= 15.0
+
+    run = run_regression_pipeline(
+        xs,
+        ys,
+        seed=7,
+        max_mae=100.0,
+        max_psi=10.0,
+        min_eval_rows=5,
+        max_cv_worst_mae=1.0,
+    )
+
+    assert not run.decision.allowed
+    assert any("cv_worst_mae" in reason for reason in run.decision.reasons)
