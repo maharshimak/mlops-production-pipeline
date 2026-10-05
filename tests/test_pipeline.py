@@ -1,4 +1,7 @@
+import pytest
+
 from mlops_pipeline.pipeline import run_regression_pipeline
+from mlops_pipeline.tracking import SQLiteRunLedger
 
 
 def test_pipeline_run_is_reproducible_and_emits_verifiable_metadata() -> None:
@@ -29,13 +32,8 @@ def test_dataset_fingerprint_changes_when_training_data_changes() -> None:
 
 
 def test_pipeline_rejects_tiny_datasets() -> None:
-    try:
+    with pytest.raises(ValueError, match="six"):
         run_regression_pipeline([1, 2, 3], [2, 4, 6])
-    except ValueError as error:
-        assert "six" in str(error)
-    else:
-        raise AssertionError("tiny dataset should be rejected")
-
 
 
 def test_default_gate_requires_meaningful_evaluation_sample():
@@ -53,12 +51,8 @@ def test_eval_gate_threshold_is_part_of_reproducibility_config():
     xs = [float(value) for value in range(1, 25)]
     ys = [2.0 * value for value in xs]
 
-    loose = run_regression_pipeline(
-        xs, ys, max_psi=10.0, min_eval_rows=2
-    )
-    strict = run_regression_pipeline(
-        xs, ys, max_psi=10.0, min_eval_rows=5
-    )
+    loose = run_regression_pipeline(xs, ys, max_psi=10.0, min_eval_rows=2)
+    strict = run_regression_pipeline(xs, ys, max_psi=10.0, min_eval_rows=5)
 
     assert loose.config_fingerprint != strict.config_fingerprint
 
@@ -100,3 +94,36 @@ def test_pipeline_blocks_unstable_cross_validation_even_if_holdout_is_permitted(
 
     assert not run.decision.allowed
     assert any("cv_worst_mae" in reason for reason in run.decision.reasons)
+
+
+def test_pipeline_tracks_gate_rejection_separately_from_execution_failure(tmp_path) -> None:
+    ledger = SQLiteRunLedger(str(tmp_path / "runs.sqlite"))
+    xs = [float(value) for value in range(1, 13)]
+    ys = [2.0 * value for value in xs]
+
+    run = run_regression_pipeline(
+        xs,
+        ys,
+        max_mae=0.01,
+        max_psi=10.0,
+        ledger=ledger,
+    )
+
+    assert not run.decision.allowed
+    assert run.tracking_run_id is not None
+    assert ledger.get_run(run.tracking_run_id).status == "rejected"
+
+
+def test_pipeline_records_runtime_failure_after_run_identity_exists(tmp_path) -> None:
+    ledger = SQLiteRunLedger(str(tmp_path / "runs.sqlite"))
+    xs = [1.0] * 10
+    ys = [float(value) for value in range(10)]
+
+    with pytest.raises(ValueError, match="variance"):
+        run_regression_pipeline(xs, ys, ledger=ledger, run_name="constant-feature")
+
+    runs = ledger.list_runs(name="constant-feature")
+    assert len(runs) == 1
+    assert runs[0].status == "failed"
+    assert runs[0].dataset_fingerprint
+    assert runs[0].config_fingerprint
