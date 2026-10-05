@@ -24,15 +24,58 @@ class DeploymentDecision:
     reasons: tuple[str, ...]
 
 
+def _require_non_negative_number(name: str, value: object) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(value)
+        or value < 0
+    ):
+        raise ValueError(f"{name} must be finite and non-negative")
+    return float(value)
+
+
+def _validate_manifest(manifest: RunManifest) -> None:
+    if not isinstance(manifest.model_version, str) or not manifest.model_version.strip():
+        raise ValueError("model_version is required")
+    if not isinstance(manifest.model_fingerprint, str) or not manifest.model_fingerprint.strip():
+        raise ValueError("model_fingerprint is required")
+    for name, value in (("train_rows", manifest.train_rows), ("eval_rows", manifest.eval_rows)):
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(f"{name} must be a positive integer")
+    _require_non_negative_number("mae", manifest.mae)
+    _require_non_negative_number("drift_psi", manifest.drift_psi)
+    for name, value in (
+        ("cv_mean_mae", manifest.cv_mean_mae),
+        ("cv_worst_mae", manifest.cv_worst_mae),
+    ):
+        if value is not None:
+            _require_non_negative_number(name, value)
+
+
 def model_fingerprint(model: LinearModel) -> str:
-    if not all(isfinite(value) for value in (model.slope, model.intercept)):
-        raise ValueError("model coefficients must be finite")
+    if not isinstance(model.version, str) or not model.version.strip():
+        raise ValueError("model version is required")
+    for value in (model.slope, model.intercept):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            raise ValueError("model coefficients must be finite numeric values")
     payload = {
         "version": model.version,
         "slope": model.slope,
         "intercept": model.intercept,
     }
-    return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    return sha256(
+        json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
 
 
 def build_run_manifest(
@@ -45,15 +88,7 @@ def build_run_manifest(
     cv_mean_mae: float | None = None,
     cv_worst_mae: float | None = None,
 ) -> RunManifest:
-    for name, value in (("train_rows", train_rows), ("eval_rows", eval_rows)):
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(f"{name} must be a positive integer")
-    if not isfinite(mae) or mae < 0 or not isfinite(drift_psi) or drift_psi < 0:
-        raise ValueError("mae and drift_psi must be finite and non-negative")
-    for name, value in (("cv_mean_mae", cv_mean_mae), ("cv_worst_mae", cv_worst_mae)):
-        if value is not None and (not isfinite(value) or value < 0):
-            raise ValueError(f"{name} must be finite and non-negative when provided")
-    return RunManifest(
+    manifest = RunManifest(
         model_version=model.version,
         model_fingerprint=model_fingerprint(model),
         train_rows=train_rows,
@@ -63,6 +98,8 @@ def build_run_manifest(
         cv_mean_mae=cv_mean_mae,
         cv_worst_mae=cv_worst_mae,
     )
+    _validate_manifest(manifest)
+    return manifest
 
 
 def deployment_gate(
@@ -74,17 +111,16 @@ def deployment_gate(
     integrity_valid: bool = True,
     max_cv_worst_mae: float | None = None,
 ) -> DeploymentDecision:
-    if not isfinite(max_mae) or max_mae < 0 or not isfinite(max_psi) or max_psi < 0:
-        raise ValueError("quality thresholds must be finite and non-negative")
+    _validate_manifest(manifest)
+    _require_non_negative_number("max_mae", max_mae)
+    _require_non_negative_number("max_psi", max_psi)
     if isinstance(min_eval_rows, bool) or not isinstance(min_eval_rows, int) or min_eval_rows <= 0:
         raise ValueError("min_eval_rows must be a positive integer")
-
     if type(integrity_valid) is not bool:
         raise ValueError("integrity_valid must be boolean")
-    if max_cv_worst_mae is not None and (
-        not isfinite(max_cv_worst_mae) or max_cv_worst_mae < 0
-    ):
-        raise ValueError("max_cv_worst_mae must be finite and non-negative")
+    if max_cv_worst_mae is not None:
+        _require_non_negative_number("max_cv_worst_mae", max_cv_worst_mae)
+
     reasons: list[str] = []
     if not integrity_valid:
         reasons.append("artifact integrity verification failed")
