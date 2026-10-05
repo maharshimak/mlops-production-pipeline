@@ -19,11 +19,11 @@ Dependency-light ML lifecycle building blocks: deterministic single- and multi-f
 
 **Architecture:** `makma-ai-os/demo` is the shared web product source and Pages deployment. This repository owns its Python domain package. The central `tests/e2e` suite exercises all nine products; `tests/fixtures/python-parity.json` plus `scripts/generate_parity.py` guard shared mathematical contracts. Backend revisions used for regeneration are pinned in the central `backend-lock.json`.
 
-**Safety and limitations:** One-feature OLS only; no automated deployment, experiment tracking server or signed artifact registry. A digest checks bytes against a reference, not the trustworthiness of that reference. Inputs are validated, rendered user values are escaped, and deterministic results are not presented as model inference.
+**Safety and limitations:** The repository contains compact univariate and multi-feature regression paths, not a general ML platform. It has a local SQLite experiment ledger but no hosted tracking server, automated deployment or signed artifact registry. A digest checks bytes against a reference, not the trustworthiness of that reference. Inputs are validated, rendered user values are escaped, and deterministic results are not presented as model inference.
 
 **Verification:** Run `python -m ruff check .` and `python -m pytest -q`. `tests/test_engineering_upgrade.py` protects the new rejection/correctness paths. Central web checks: `npm ci`, `npm test`, `npm run build`, `npx playwright install --with-deps chromium`, `npm run test:e2e`. CI gates publishing on browser interactions and validates all public URLs after deployment.
 
-**Durable experiment tracking:** `SQLiteRunLedger` records run identity, dataset/config fingerprints, parameters, MAE/PSI metrics, artifact references and terminal status. `run_regression_pipeline` can write directly to this ledger so tracking is tied to the actual training run rather than a separate demo.
+**Durable experiment tracking:** `SQLiteRunLedger` records run identity, dataset/config fingerprints, typed parameters, finite metrics, artifact references and one-way terminal status. `run_regression_pipeline` now creates the tracked run before model execution, records runtime failures, distinguishes deployment-gate rejection from execution failure, and prevents terminal runs from being mutated or reopened.
 
 **Highest-value next work:** Trusted signed manifests, dataset versioning and CI deployment integrations.
 
@@ -36,11 +36,11 @@ Dependency-light ML lifecycle building blocks: deterministic single- and multi-f
 - Prediction, mean absolute error and fail-closed quality threshold checks.
 - Versioned coefficient dataclass and PSI over normalized non-negative bin counts.
 - Deterministic seeded train/evaluation splitting with held-out MAE and measured train/eval PSI.
-- Dataset and configuration SHA-256 fingerprints, reproducible model artifact payload and deployment-gate result.
+- Dataset and configuration SHA-256 fingerprints, reproducible model artifact payload and deployment-gate result.\n- Deterministic k-fold stability evidence and a local SQLite run ledger with explicit `running -> succeeded/rejected/failed/cancelled` lifecycle.
 
 ## Scope and limitations
 
-This remains a compact reproducible ML pipeline library rather than a production serving/deployment platform. The implemented training model is still univariate OLS, but `run_regression_pipeline` now performs a deterministic seeded split, held-out evaluation, train/eval drift measurement, dataset/config fingerprinting, reproducible artifact serialization and a quality/integrity deployment decision. There is no external dataset service, model registry, artifact store, online serving, monitoring collector or automated infrastructure deployment.
+This remains a compact reproducible ML pipeline library rather than a production serving/deployment platform. `run_regression_pipeline` uses univariate OLS for the inspectable baseline and performs a deterministic seeded split, held-out evaluation, train/eval drift measurement, cross-validation, dataset/config fingerprinting, reproducible artifact serialization and a quality/integrity deployment decision. A separate multi-feature regression path is also included. The SQLite ledger is durable local audit history, not a distributed tracking service. There is no external dataset service, model registry, artifact store, online serving, monitoring collector or automated infrastructure deployment.
 
 ## Multi-feature pipeline
 
@@ -94,7 +94,7 @@ docker run --rm mlops-production-pipeline
 
 ## Next engineering work
 
-Multivariate/classification estimators; file-backed dataset loaders; persisted artifact/manifests; explicit train/validation/test modes; CLI pipeline execution; control-plane registration; deployment and monitoring adapters. These are planned work, not current capabilities.
+Classification estimators; file-backed/versioned dataset loaders; signed persisted artifact manifests; explicit train/validation/test modes; CLI pipeline execution; control-plane registration; idempotent deployment and monitoring adapters. These are planned work, not current capabilities.
 
 ## Contributing and security
 
