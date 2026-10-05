@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import random
+import sqlite3
 import tempfile
+from contextlib import suppress
 from dataclasses import dataclass
 from hashlib import sha256
 from math import ceil, isfinite
@@ -244,9 +246,8 @@ def run_regression_pipeline(
         )
     except Exception:
         if ledger is not None and tracking_run_id is not None:
-            try:
+            # Preserve the original pipeline failure if the local audit ledger
+            # is also unavailable while recording the failure state.
+            with suppress(sqlite3.Error, KeyError, ValueError):
                 ledger.finish_run(tracking_run_id, status="failed")
-            except Exception:
-                # Preserve the original pipeline failure if tracking also fails.
-                pass
         raise
