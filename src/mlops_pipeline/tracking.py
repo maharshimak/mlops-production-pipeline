@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from uuid import uuid4
+
+TERMINAL_STATUSES = {"succeeded", "rejected", "failed", "cancelled"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,18 +17,27 @@ class TrackedRun:
     status: str
     dataset_fingerprint: str
     config_fingerprint: str
-    params: dict[str, str]
+    params: dict[str, object]
     metrics: dict[str, float]
     artifacts: dict[str, str]
+
+
+def _strict_json(value: object) -> str:
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 class SQLiteRunLedger:
     """Small local experiment tracker for reproducible pipeline runs.
 
-    It records immutable run identity plus parameters, metrics and artifact
-    references. This gives the pipeline an auditable lifecycle without forcing a
-    heavyweight external tracking server; production deployments can later
-    adapt the same concepts to MLflow or another backend.
+    Run identity is immutable. Parameters, metrics and artifact references may
+    only be written while a run is active, and terminal state transitions are
+    one-way. This keeps the local ledger useful as audit evidence without
+    pretending to be a distributed experiment-tracking service.
     """
 
     def __init__(self, path: str) -> None:
@@ -62,13 +74,11 @@ class SQLiteRunLedger:
         config_fingerprint: str,
         params: dict[str, object] | None = None,
     ) -> str:
-        if not name.strip() or not dataset_fingerprint.strip() or not config_fingerprint.strip():
+        values = (name, dataset_fingerprint, config_fingerprint)
+        if any(not isinstance(value, str) or not value.strip() for value in values):
             raise ValueError("name and fingerprints are required.")
+        rendered_params = _strict_json(params or {})
         run_id = str(uuid4())
-        rendered_params = {
-            str(key): json.dumps(value, sort_keys=True, separators=(",", ":"))
-            for key, value in (params or {}).items()
-        }
         self.connection.execute(
             """
             INSERT INTO runs(
@@ -82,22 +92,33 @@ class SQLiteRunLedger:
                 name,
                 dataset_fingerprint,
                 config_fingerprint,
-                json.dumps(rendered_params, sort_keys=True, separators=(",", ":")),
+                rendered_params,
             ),
         )
         self.connection.commit()
         return run_id
 
     def log_metric(self, run_id: str, name: str, value: float) -> None:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise TypeError("metric value must be numeric.")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("metric name is required.")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not isfinite(value)
+        ):
+            raise ValueError("metric value must be finite numeric data.")
         run = self.get_run(run_id)
         metrics = dict(run.metrics)
         metrics[name] = float(value)
         self._update_json(run_id, "metrics_json", metrics)
 
     def log_artifact(self, run_id: str, name: str, uri: str) -> None:
-        if not name.strip() or not uri.strip():
+        if (
+            not isinstance(name, str)
+            or not isinstance(uri, str)
+            or not name.strip()
+            or not uri.strip()
+        ):
             raise ValueError("artifact name and URI are required.")
         run = self.get_run(run_id)
         artifacts = dict(run.artifacts)
@@ -105,28 +126,48 @@ class SQLiteRunLedger:
         self._update_json(run_id, "artifacts_json", artifacts)
 
     def finish_run(self, run_id: str, *, status: str = "succeeded") -> None:
-        if status not in {"succeeded", "failed", "cancelled"}:
+        if status not in TERMINAL_STATUSES:
             raise ValueError("invalid run status.")
         cursor = self.connection.execute(
             """
-            UPDATE runs SET status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE run_id = ?
+            UPDATE runs
+            SET status = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ? AND status = 'running'
             """,
             (status, run_id),
         )
         if cursor.rowcount != 1:
-            raise KeyError(f"Unknown run: {run_id}")
+            self.connection.rollback()
+            try:
+                run = self.get_run(run_id)
+            except KeyError:
+                raise
+            raise ValueError(
+                f"Run {run_id} is already terminal with status {run.status}."
+            )
         self.connection.commit()
 
     def _update_json(self, run_id: str, column: str, value: dict[str, object]) -> None:
         if column not in {"metrics_json", "artifacts_json"}:
             raise ValueError("unsupported ledger column.")
+        payload = _strict_json(value)
         cursor = self.connection.execute(
-            f"UPDATE runs SET {column} = ?, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
-            (json.dumps(value, sort_keys=True, separators=(",", ":")), run_id),
+            f"""
+            UPDATE runs
+            SET {column} = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE run_id = ? AND status = 'running'
+            """,
+            (payload, run_id),
         )
         if cursor.rowcount != 1:
-            raise KeyError(f"Unknown run: {run_id}")
+            self.connection.rollback()
+            try:
+                run = self.get_run(run_id)
+            except KeyError:
+                raise
+            raise ValueError(
+                f"Run {run_id} is already terminal with status {run.status}."
+            )
         self.connection.commit()
 
     def get_run(self, run_id: str) -> TrackedRun:
@@ -147,7 +188,10 @@ class SQLiteRunLedger:
             dataset_fingerprint=row["dataset_fingerprint"],
             config_fingerprint=row["config_fingerprint"],
             params=json.loads(row["params_json"]),
-            metrics={key: float(value) for key, value in json.loads(row["metrics_json"]).items()},
+            metrics={
+                key: float(value)
+                for key, value in json.loads(row["metrics_json"]).items()
+            },
             artifacts=json.loads(row["artifacts_json"]),
         )
 
