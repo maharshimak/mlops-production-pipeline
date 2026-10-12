@@ -91,22 +91,24 @@ def test_concurrent_ledger_writers_keep_each_metric(tmp_path):
     run_id = original.start_run(
         "regression", dataset_fingerprint="d", config_fingerprint="c",
     )
-    workers = [SQLiteRunLedger(str(db)) for _ in range(8)]
-
     def append(index):
-        workers[index].log_metric(run_id, f"metric_{index}", float(index))
-        workers[index].log_artifact(run_id, f"artifact_{index}", f"sha256:{index}")
+        # SQLite connections belong to their creating thread. Each writer uses
+        # an independent connection, as a real concurrent worker would.
+        worker = SQLiteRunLedger(str(db))
+        try:
+            worker.log_metric(run_id, f"metric_{index}", float(index))
+            worker.log_artifact(run_id, f"artifact_{index}", f"sha256:{index}")
+        finally:
+            worker.close()
 
-    with ThreadPoolExecutor(max_workers=len(workers)) as pool:
-        list(pool.map(append, range(len(workers))))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(append, range(8)))
 
     record = original.get_run(run_id)
     assert len(record.metrics) == 8
     assert len(record.artifacts) == 8
     assert {f"metric_{i}" for i in range(8)} == set(record.metrics)
     assert {f"artifact_{i}" for i in range(8)} == set(record.artifacts)
-    for worker in workers:
-        worker.close()
     original.close()
 
 
