@@ -105,28 +105,35 @@ class SQLiteRunLedger:
         self._update_json(run_id, "artifacts_json", artifacts)
 
     def finish_run(self, run_id: str, *, status: str = "succeeded") -> None:
-        if status not in {"succeeded", "failed", "cancelled"}:
+        if status not in {"succeeded", "rejected", "failed", "cancelled"}:
             raise ValueError("invalid run status.")
         cursor = self.connection.execute(
             """
             UPDATE runs SET status = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE run_id = ?
+            WHERE run_id = ? AND status = 'running'
             """,
             (status, run_id),
         )
         if cursor.rowcount != 1:
-            raise KeyError(f"Unknown run: {run_id}")
+            self._reject_mutation(run_id)
         self.connection.commit()
+
+    def _reject_mutation(self, run_id: str) -> None:
+        record = self.get_run(run_id)
+        raise ValueError(
+            f"Run {run_id} is {record.status}; only running runs may change."
+        )
 
     def _update_json(self, run_id: str, column: str, value: dict[str, object]) -> None:
         if column not in {"metrics_json", "artifacts_json"}:
             raise ValueError("unsupported ledger column.")
         cursor = self.connection.execute(
-            f"UPDATE runs SET {column} = ?, updated_at = CURRENT_TIMESTAMP WHERE run_id = ?",
+            f"UPDATE runs SET {column} = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE run_id = ? AND status = 'running'",
             (json.dumps(value, sort_keys=True, separators=(",", ":")), run_id),
         )
         if cursor.rowcount != 1:
-            raise KeyError(f"Unknown run: {run_id}")
+            self._reject_mutation(run_id)
         self.connection.commit()
 
     def get_run(self, run_id: str) -> TrackedRun:
