@@ -204,7 +204,7 @@ def run_regression_pipeline(
             )
             ledger.finish_run(
                 tracking_run_id,
-                status="succeeded" if decision.allowed else "failed",
+                status="succeeded" if decision.allowed else "rejected",
             )
         except Exception:
             ledger.finish_run(tracking_run_id, status="failed")
