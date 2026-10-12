@@ -81,3 +81,55 @@ def test_tracking_state_survives_database_restart(tmp_path):
     assert persisted.status == "failed"
     assert persisted.artifacts["model"] == "sha256:abc"
     reader.close()
+
+
+def test_concurrent_ledger_writers_keep_each_metric(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    db = tmp_path / "concurrent.sqlite"
+    original = SQLiteRunLedger(str(db))
+    run_id = original.start_run(
+        "regression", dataset_fingerprint="d", config_fingerprint="c",
+    )
+    workers = [SQLiteRunLedger(str(db)) for _ in range(8)]
+
+    def append(index):
+        workers[index].log_metric(run_id, f"metric_{index}", float(index))
+        workers[index].log_artifact(run_id, f"artifact_{index}", f"sha256:{index}")
+
+    with ThreadPoolExecutor(max_workers=len(workers)) as pool:
+        list(pool.map(append, range(len(workers))))
+
+    record = original.get_run(run_id)
+    assert len(record.metrics) == 8
+    assert len(record.artifacts) == 8
+    assert {f"metric_{i}" for i in range(8)} == set(record.metrics)
+    assert {f"artifact_{i}" for i in range(8)} == set(record.artifacts)
+    for worker in workers:
+        worker.close()
+    original.close()
+
+
+def test_ledger_failed_json_update_rolls_back_transaction(tmp_path):
+    import sqlite3
+
+    import pytest
+
+    db = tmp_path / "rollback.sqlite"
+    ledger = SQLiteRunLedger(str(db))
+    run_id = ledger.start_run(
+        "repro", dataset_fingerprint="d", config_fingerprint="c",
+    )
+    with sqlite3.connect(db) as connection:
+        connection.execute(
+            "CREATE TRIGGER fail_metric BEFORE UPDATE OF metrics_json ON runs "
+            "BEGIN SELECT RAISE(ABORT, 'metrics read-only'); END"
+        )
+
+    with pytest.raises(sqlite3.DatabaseError, match="metrics read-only"):
+        ledger.log_metric(run_id, "accuracy", 0.99)
+
+    assert ledger.get_run(run_id).metrics == {}
+    ledger.log_artifact(run_id, "model", "sha256:untouched")
+    assert ledger.get_run(run_id).artifacts["model"] == "sha256:untouched"
+    ledger.close()
