@@ -91,18 +91,12 @@ class SQLiteRunLedger:
     def log_metric(self, run_id: str, name: str, value: float) -> None:
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError("metric value must be numeric.")
-        run = self.get_run(run_id)
-        metrics = dict(run.metrics)
-        metrics[name] = float(value)
-        self._update_json(run_id, "metrics_json", metrics)
+        self._update_json(run_id, "metrics_json", name, float(value))
 
     def log_artifact(self, run_id: str, name: str, uri: str) -> None:
         if not name.strip() or not uri.strip():
             raise ValueError("artifact name and URI are required.")
-        run = self.get_run(run_id)
-        artifacts = dict(run.artifacts)
-        artifacts[name] = uri
-        self._update_json(run_id, "artifacts_json", artifacts)
+        self._update_json(run_id, "artifacts_json", name, uri)
 
     def finish_run(self, run_id: str, *, status: str = "succeeded") -> None:
         if status not in {"succeeded", "rejected", "failed", "cancelled"}:
@@ -124,17 +118,39 @@ class SQLiteRunLedger:
             f"Run {run_id} is {record.status}; only running runs may change."
         )
 
-    def _update_json(self, run_id: str, column: str, value: dict[str, object]) -> None:
+    def _update_json(
+        self, run_id: str, column: str, key: str, value: object
+    ) -> None:
+        """Serialize each JSON-field append with a SQLite writer lock.
+
+        Reads performed outside this transaction could overwrite a metric or
+        artifact appended concurrently by another process.
+        """
         if column not in {"metrics_json", "artifacts_json"}:
             raise ValueError("unsupported ledger column.")
-        cursor = self.connection.execute(
-            f"UPDATE runs SET {column} = ?, updated_at = CURRENT_TIMESTAMP "
-            "WHERE run_id = ? AND status = 'running'",
-            (json.dumps(value, sort_keys=True, separators=(",", ":")), run_id),
-        )
-        if cursor.rowcount != 1:
-            self._reject_mutation(run_id)
-        self.connection.commit()
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            row = self.connection.execute(
+                f"SELECT status, {column} FROM runs WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Unknown run: {run_id}")
+            if row["status"] != "running":
+                raise ValueError(
+                    f"Run {run_id} is {row['status']}; only running runs may change."
+                )
+            items = json.loads(row[column])
+            items[key] = value
+            self.connection.execute(
+                f"UPDATE runs SET {column} = ?, updated_at = CURRENT_TIMESTAMP "
+                "WHERE run_id = ? AND status = 'running'",
+                (json.dumps(items, sort_keys=True, separators=(",", ":")), run_id),
+            )
+            self.connection.commit()
+        except Exception:
+            self.connection.rollback()
+            raise
 
     def get_run(self, run_id: str) -> TrackedRun:
         row = self.connection.execute(
