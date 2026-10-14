@@ -139,6 +139,7 @@ def test_ledger_failed_json_update_rolls_back_transaction(tmp_path):
 
 def test_training_failure_is_durably_registered_before_compute(tmp_path, monkeypatch):
     import pytest
+
     import mlops_pipeline.pipeline as module
 
     ledger = SQLiteRunLedger(str(tmp_path / "early-failure.sqlite"))
