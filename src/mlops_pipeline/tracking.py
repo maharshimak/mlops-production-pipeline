@@ -112,11 +112,29 @@ class SQLiteRunLedger:
             self._reject_mutation(run_id)
         self.connection.commit()
 
+    def heartbeat_run(self, run_id: str) -> None:
+        """Refresh the run lease while a worker is alive.
+
+        Callers executing a long task must heartbeat periodically through an
+        independent connection. Failed/terminal or unknown runs cannot revive.
+        """
+        cursor = self.connection.execute(
+            "UPDATE runs SET updated_at = CURRENT_TIMESTAMP "
+            "WHERE run_id = ? AND status = 'running'",
+            (run_id,),
+        )
+        if cursor.rowcount != 1:
+            self.connection.rollback()
+            self._reject_mutation(run_id)
+        self.connection.commit()
+
     def recover_stale_runs(self, *, older_than_seconds: int) -> int:
         """Explicitly fail abandoned running entries after a worker crash.
 
         This is *not* automatic: operators must choose a threshold above the
-        longest legitimate workload to avoid cancelling an active worker.
+        expected heartbeat interval and above scheduling/clock delays.
+        Without heartbeats from a separate worker, long legitimate workloads
+        can be mistaken for crashes.
         """
         if type(older_than_seconds) is not int or older_than_seconds <= 0:
             raise ValueError("older_than_seconds must be a positive integer.")
