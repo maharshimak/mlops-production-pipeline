@@ -187,3 +187,78 @@ def test_abandoned_run_recovery_is_opt_in_and_idempotent(tmp_path):
     assert reopened.get_run(active).status == "running"
     assert reopened.recover_stale_runs(older_than_seconds=3600) == 0
     reopened.close()
+
+
+def test_heartbeat_preserves_active_run_while_stale_peer_is_recovered(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    db = tmp_path / "heartbeats.sqlite"
+    creator = SQLiteRunLedger(str(db))
+    active = creator.start_run(
+        "active", dataset_fingerprint="data", config_fingerprint="config",
+    )
+    abandoned = creator.start_run(
+        "abandoned", dataset_fingerprint="data", config_fingerprint="config",
+    )
+    creator.connection.execute(
+        "UPDATE runs SET updated_at = datetime('now', '-2 days')"
+        "WHERE run_id IN (?, ?)",
+        (active, abandoned),
+    )
+    creator.connection.commit()
+    creator.close()
+
+    def heartbeat():
+        worker = SQLiteRunLedger(str(db))
+        try:
+            worker.heartbeat_run(active)
+        finally:
+            worker.close()
+
+    # Heartbeat is sent by an independent connection to model a live worker.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(heartbeat).result()
+    operator = SQLiteRunLedger(str(db))
+    assert operator.recover_stale_runs(older_than_seconds=3600) == 1
+    assert operator.get_run(active).status == "running"
+    assert operator.get_run(abandoned).status == "failed"
+    operator.finish_run(active, status="succeeded")
+    import pytest
+
+    with pytest.raises(ValueError, match="only running"):
+        operator.heartbeat_run(active)
+    operator.close()
+
+
+def test_concurrent_stale_recovery_never_mutates_run_twice(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    db = tmp_path / "recovery-race.sqlite"
+    writer = SQLiteRunLedger(str(db))
+    run_id = writer.start_run(
+        "crashed", dataset_fingerprint="d", config_fingerprint="c",
+    )
+    writer.connection.execute(
+        "UPDATE runs SET updated_at = datetime('now', '-2 days') WHERE run_id = ?",
+        (run_id,),
+    )
+    writer.connection.commit()
+    writer.close()
+
+    barrier = Barrier(4)
+
+    def recover(_):
+        worker = SQLiteRunLedger(str(db))
+        try:
+            barrier.wait(timeout=10)
+            return worker.recover_stale_runs(older_than_seconds=3600)
+        finally:
+            worker.close()
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(recover, range(4)))
+    assert sorted(results) == [0, 0, 0, 1]
+    verify = SQLiteRunLedger(str(db))
+    assert verify.get_run(run_id).status == "failed"
+    verify.close()
