@@ -185,28 +185,28 @@ def run_regression_pipeline(
         )
 
         if ledger is not None and tracking_run_id is not None:
-        ledger.log_metric(tracking_run_id, "mae", eval_mae)
-        ledger.log_metric(tracking_run_id, "psi", drift_psi)
-        ledger.log_metric(
-            tracking_run_id,
-            "cv_mean_mae",
-            cross_validation.mean_mae,
-        )
-        ledger.log_metric(
-            tracking_run_id,
-            "cv_worst_mae",
-            cross_validation.worst_mae,
-        )
-        artifact_digest = sha256(artifact_payload.encode()).hexdigest()
-        ledger.log_artifact(
-            tracking_run_id,
-            "model",
-            f"sha256:{artifact_digest}",
-        )
-        ledger.finish_run(
-            tracking_run_id,
-            status="succeeded" if decision.allowed else "rejected",
-        )
+            ledger.log_metric(tracking_run_id, "mae", eval_mae)
+            ledger.log_metric(tracking_run_id, "psi", drift_psi)
+            ledger.log_metric(
+                tracking_run_id,
+                "cv_mean_mae",
+                cross_validation.mean_mae,
+            )
+            ledger.log_metric(
+                tracking_run_id,
+                "cv_worst_mae",
+                cross_validation.worst_mae,
+            )
+            artifact_digest = sha256(artifact_payload.encode()).hexdigest()
+            ledger.log_artifact(
+                tracking_run_id,
+                "model",
+                f"sha256:{artifact_digest}",
+            )
+            ledger.finish_run(
+                tracking_run_id,
+                status="succeeded" if decision.allowed else "rejected",
+            )
     except Exception:
         # A training/CV/artifact failure is now captured even before metrics
         # exist; terminal status changes remain immutable.
