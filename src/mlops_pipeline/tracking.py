@@ -112,6 +112,29 @@ class SQLiteRunLedger:
             self._reject_mutation(run_id)
         self.connection.commit()
 
+    def recover_stale_runs(self, *, older_than_seconds: int) -> int:
+        """Explicitly fail abandoned running entries after a worker crash.
+
+        This is *not* automatic: operators must choose a threshold above the
+        longest legitimate workload to avoid cancelling an active worker.
+        """
+        if type(older_than_seconds) is not int or older_than_seconds <= 0:
+            raise ValueError("older_than_seconds must be a positive integer.")
+        try:
+            self.connection.execute("BEGIN IMMEDIATE")
+            cursor = self.connection.execute(
+                "UPDATE runs SET status = 'failed', "
+                "updated_at = CURRENT_TIMESTAMP "
+                "WHERE status = 'running' AND "
+                "updated_at <= datetime('now', ?)",
+                (f"-{older_than_seconds} seconds",),
+            )
+            self.connection.commit()
+            return cursor.rowcount
+        except Exception:
+            self.connection.rollback()
+            raise
+
     def _reject_mutation(self, run_id: str) -> None:
         record = self.get_run(run_id)
         raise ValueError(

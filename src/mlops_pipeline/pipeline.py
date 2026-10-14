@@ -85,45 +85,6 @@ def run_regression_pipeline(
         raise ValueError("cv_folds must be an integer >= 2.")
     effective_cv_threshold = max_mae if max_cv_worst_mae is None else max_cv_worst_mae
 
-    indices = list(range(len(xs)))
-    random.Random(seed).shuffle(indices)
-    eval_count = max(2, ceil(len(indices) * eval_fraction))
-    eval_indices = tuple(sorted(indices[:eval_count]))
-    train_indices = tuple(sorted(indices[eval_count:]))
-    if len(train_indices) < 2:
-        raise ValueError("Training split must contain at least two observations.")
-
-    train_x = [xs[index] for index in train_indices]
-    train_y = [ys[index] for index in train_indices]
-    eval_x = [xs[index] for index in eval_indices]
-    eval_y = [ys[index] for index in eval_indices]
-
-    model = train(train_x, train_y, version=version)
-    eval_mae = mae(model, eval_x, eval_y)
-    cross_validation = kfold_regression_cv(
-        [[value] for value in xs],
-        ys,
-        folds=cv_folds,
-        seed=seed,
-    )
-
-    # Histogram boundaries are fitted only on the training/reference split.
-    # Evaluation observations are projected into those frozen bins.
-    minimum = min(train_x)
-    maximum = max(train_x)
-    train_hist = _histogram(train_x, minimum, maximum)
-    eval_hist = _histogram(eval_x, minimum, maximum)
-    drift_psi = psi(train_hist, eval_hist)
-
-    manifest = build_run_manifest(
-        model,
-        train_rows=len(train_indices),
-        eval_rows=len(eval_indices),
-        mae=eval_mae,
-        drift_psi=drift_psi,
-        cv_mean_mae=cross_validation.mean_mae,
-        cv_worst_mae=cross_validation.worst_mae,
-    )
     dataset_fingerprint = _fingerprint(list(zip(xs, ys, strict=True)))
     config_fingerprint = _fingerprint(
         {
@@ -137,35 +98,6 @@ def run_regression_pipeline(
             "max_cv_worst_mae": effective_cv_threshold,
         }
     )
-    artifact_payload = json.dumps(
-        {
-            "version": model.version,
-            "slope": model.slope,
-            "intercept": model.intercept,
-            "dataset_fingerprint": dataset_fingerprint,
-            "config_fingerprint": config_fingerprint,
-        },
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-    # The deployment decision is now based on a real byte-level verification of
-    # the serialized artifact rather than a hard-coded integrity_valid=True.
-    with tempfile.TemporaryDirectory(prefix="mlops-pipeline-integrity-") as temp_dir:
-        artifact_path = Path(temp_dir) / "model.json"
-        artifact_path.write_text(artifact_payload, encoding="utf-8")
-        integrity_manifest = build_integrity_manifest(temp_dir, ["model.json"])
-        integrity_valid = verify_integrity_manifest(temp_dir, integrity_manifest).valid
-
-    decision = deployment_gate(
-        manifest,
-        max_mae=max_mae,
-        max_psi=max_psi,
-        min_eval_rows=min_eval_rows,
-        integrity_valid=integrity_valid,
-        max_cv_worst_mae=effective_cv_threshold,
-    )
-
     tracking_run_id: str | None = None
     if ledger is not None:
         tracking_run_id = ledger.start_run(
@@ -183,7 +115,76 @@ def run_regression_pipeline(
                 "max_cv_worst_mae": effective_cv_threshold,
             },
         )
-        try:
+    try:
+        indices = list(range(len(xs)))
+        random.Random(seed).shuffle(indices)
+        eval_count = max(2, ceil(len(indices) * eval_fraction))
+        eval_indices = tuple(sorted(indices[:eval_count]))
+        train_indices = tuple(sorted(indices[eval_count:]))
+        if len(train_indices) < 2:
+            raise ValueError("Training split must contain at least two observations.")
+
+        train_x = [xs[index] for index in train_indices]
+        train_y = [ys[index] for index in train_indices]
+        eval_x = [xs[index] for index in eval_indices]
+        eval_y = [ys[index] for index in eval_indices]
+
+        model = train(train_x, train_y, version=version)
+        eval_mae = mae(model, eval_x, eval_y)
+        cross_validation = kfold_regression_cv(
+            [[value] for value in xs],
+            ys,
+            folds=cv_folds,
+            seed=seed,
+        )
+
+        # Histogram boundaries are fitted only on the training/reference split.
+        # Evaluation observations are projected into those frozen bins.
+        minimum = min(train_x)
+        maximum = max(train_x)
+        train_hist = _histogram(train_x, minimum, maximum)
+        eval_hist = _histogram(eval_x, minimum, maximum)
+        drift_psi = psi(train_hist, eval_hist)
+
+        manifest = build_run_manifest(
+            model,
+            train_rows=len(train_indices),
+            eval_rows=len(eval_indices),
+            mae=eval_mae,
+            drift_psi=drift_psi,
+            cv_mean_mae=cross_validation.mean_mae,
+            cv_worst_mae=cross_validation.worst_mae,
+        )
+        artifact_payload = json.dumps(
+            {
+                "version": model.version,
+                "slope": model.slope,
+                "intercept": model.intercept,
+                "dataset_fingerprint": dataset_fingerprint,
+                "config_fingerprint": config_fingerprint,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+        # The deployment decision is now based on a real byte-level verification of
+        # the serialized artifact rather than a hard-coded integrity_valid=True.
+        with tempfile.TemporaryDirectory(prefix="mlops-pipeline-integrity-") as temp_dir:
+            artifact_path = Path(temp_dir) / "model.json"
+            artifact_path.write_text(artifact_payload, encoding="utf-8")
+            integrity_manifest = build_integrity_manifest(temp_dir, ["model.json"])
+            integrity_valid = verify_integrity_manifest(temp_dir, integrity_manifest).valid
+
+        decision = deployment_gate(
+            manifest,
+            max_mae=max_mae,
+            max_psi=max_psi,
+            min_eval_rows=min_eval_rows,
+            integrity_valid=integrity_valid,
+            max_cv_worst_mae=effective_cv_threshold,
+        )
+
+        if ledger is not None and tracking_run_id is not None:
             ledger.log_metric(tracking_run_id, "mae", eval_mae)
             ledger.log_metric(tracking_run_id, "psi", drift_psi)
             ledger.log_metric(
@@ -206,9 +207,12 @@ def run_regression_pipeline(
                 tracking_run_id,
                 status="succeeded" if decision.allowed else "rejected",
             )
-        except Exception:
+    except Exception:
+        # A training/CV/artifact failure is now captured even before metrics
+        # exist; terminal status changes remain immutable.
+        if ledger is not None and tracking_run_id is not None:
             ledger.finish_run(tracking_run_id, status="failed")
-            raise
+        raise
 
     return PipelineRun(
         model=model,

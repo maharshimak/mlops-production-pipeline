@@ -135,3 +135,55 @@ def test_ledger_failed_json_update_rolls_back_transaction(tmp_path):
     ledger.log_artifact(run_id, "model", "sha256:untouched")
     assert ledger.get_run(run_id).artifacts["model"] == "sha256:untouched"
     ledger.close()
+
+
+def test_training_failure_is_durably_registered_before_compute(tmp_path, monkeypatch):
+    import pytest
+
+    import mlops_pipeline.pipeline as module
+
+    ledger = SQLiteRunLedger(str(tmp_path / "early-failure.sqlite"))
+    def fail_training(*args, **kwargs):
+        raise RuntimeError("simulated training failure")
+
+    monkeypatch.setattr(module, "train", fail_training)
+    xs = [float(i) for i in range(1, 21)]
+    with pytest.raises(RuntimeError, match="simulated training failure"):
+        run_regression_pipeline(xs, [2*x+1 for x in xs], ledger=ledger)
+
+    record = ledger.connection.execute("SELECT run_id FROM runs").fetchone()
+    assert record is not None
+    persisted = ledger.get_run(record["run_id"])
+    assert persisted.status == "failed"
+    assert persisted.metrics == {}
+    ledger.close()
+
+
+def test_abandoned_run_recovery_is_opt_in_and_idempotent(tmp_path):
+    import pytest
+
+    db = tmp_path / "abandoned.sqlite"
+    ledger = SQLiteRunLedger(str(db))
+    abandoned = ledger.start_run(
+        "abandoned", dataset_fingerprint="data", config_fingerprint="config"
+    )
+    active = ledger.start_run(
+        "active", dataset_fingerprint="data", config_fingerprint="config"
+    )
+    ledger.connection.execute(
+        "UPDATE runs SET updated_at = datetime('now', '-2 days') WHERE run_id = ?",
+        (abandoned,),
+    )
+    ledger.connection.commit()
+    ledger.close()
+
+    reopened = SQLiteRunLedger(str(db))
+    assert reopened.get_run(abandoned).status == "running"
+    for invalid in (0, -1, True):
+        with pytest.raises(ValueError, match="positive integer"):
+            reopened.recover_stale_runs(older_than_seconds=invalid)
+    assert reopened.recover_stale_runs(older_than_seconds=3600) == 1
+    assert reopened.get_run(abandoned).status == "failed"
+    assert reopened.get_run(active).status == "running"
+    assert reopened.recover_stale_runs(older_than_seconds=3600) == 0
+    reopened.close()
