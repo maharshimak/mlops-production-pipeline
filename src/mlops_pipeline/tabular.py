@@ -91,9 +91,16 @@ def train_tabular(
         sum(row[column] for row in features) / len(features)
         for column in range(width)
     ]
+    if not all(isfinite(value) for value in means):
+        raise ValueError("Training feature means must be finite.")
     scales: list[float] = []
     for column, mean in enumerate(means):
-        variance = sum((row[column] - mean) ** 2 for row in features) / len(features)
+        try:
+            variance = sum((row[column] - mean) ** 2 for row in features) / len(features)
+        except OverflowError as error:
+            raise ValueError("Training feature variance must be finite.") from error
+        if not isfinite(variance):
+            raise ValueError("Training feature variance must be finite.")
         scale = sqrt(variance)
         scales.append(scale if scale > 1e-12 else 1.0)
 
@@ -116,7 +123,13 @@ def train_tabular(
     for index in range(1, parameter_count):
         gram[index][index] += ridge
 
+    if not all(isfinite(value) for row in gram for value in row) or not all(
+        isfinite(value) for value in rhs
+    ):
+        raise ValueError("Training system must contain finite values.")
     parameters = _solve(gram, rhs)
+    if not all(isfinite(value) for value in parameters):
+        raise ValueError("Training produced non-finite model coefficients.")
     return TabularLinearModel(
         weights=tuple(parameters[1:]),
         intercept=parameters[0],

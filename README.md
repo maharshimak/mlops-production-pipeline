@@ -46,6 +46,8 @@ This remains a compact reproducible ML pipeline library rather than a production
 
 In addition to the original dependency-light single-feature baseline, `run_tabular_regression_pipeline` now supports multiple numeric features with feature normalization, ridge-stabilized linear regression, deterministic train/eval splits, held-out MAE and dataset/config/artifact fingerprints. The simpler baseline remains available for parity and educational inspection.
 
+Tabular training rejects non-finite feature statistics, linear systems and fitted coefficients, including overflow from otherwise finite inputs. Extremely large values may require caller-side rescaling; this implementation does not provide arbitrary-precision training.
+
 ## Installation and development
 
 Requires Python 3.12 or newer. Run from this project directory.
