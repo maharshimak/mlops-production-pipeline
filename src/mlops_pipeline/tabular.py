@@ -191,8 +191,8 @@ def run_tabular_regression_pipeline(
     eval_count = max(1, ceil(len(indices) * eval_fraction))
     eval_indices = tuple(sorted(indices[:eval_count]))
     train_indices = tuple(sorted(indices[eval_count:]))
-    if len(train_indices) < 3:
-        raise ValueError("Training split must contain at least three rows.")
+    if len(train_indices) < 4:
+        raise ValueError("Training split must contain at least four rows.")
 
     train_x = [features[index] for index in train_indices]
     train_y = [targets[index] for index in train_indices]
@@ -201,8 +201,13 @@ def run_tabular_regression_pipeline(
 
     model = train_tabular(train_x, train_y, version=version, ridge=ridge)
     eval_mae = tabular_mae(model, eval_x, eval_y)
+    # Numbers are canonicalised to float so numerically identical datasets
+    # (e.g. ``1`` vs ``1.0``) share one fingerprint.
     dataset_fingerprint = _fingerprint(
-        {"features": features, "targets": targets}
+        {
+            "features": [[float(value) + 0.0 for value in row] for row in features],
+            "targets": [float(value) + 0.0 for value in targets],
+        }
     )
     config_fingerprint = _fingerprint(
         {

@@ -124,7 +124,10 @@ def run_regression_pipeline(
         cv_mean_mae=cross_validation.mean_mae,
         cv_worst_mae=cross_validation.worst_mae,
     )
-    dataset_fingerprint = _fingerprint(list(zip(xs, ys, strict=True)))
+    # Canonicalise numbers to float so ``1`` and ``1.0`` produce one fingerprint.
+    dataset_fingerprint = _fingerprint(
+        [[float(x) + 0.0, float(y) + 0.0] for x, y in zip(xs, ys, strict=True)]
+    )
     config_fingerprint = _fingerprint(
         {
             "version": version,
