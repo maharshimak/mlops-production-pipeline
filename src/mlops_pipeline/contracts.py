@@ -11,6 +11,7 @@ envelope reports ``execution_mode = "deterministic_offline"``.
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import time
@@ -19,6 +20,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from importlib import metadata
+from pathlib import Path
 
 from mlops_pipeline.datasets import (
     DatasetSchema,
@@ -36,6 +38,7 @@ from mlops_pipeline.experiment import (
 )
 from mlops_pipeline.model_card import model_card_markdown
 
+WORKSPACE_ENV = "MLOPS_PIPELINE_WORKSPACE"
 CONTRACT_VERSION = "makma.v1"
 SYSTEM = "mlops-production-pipeline"
 EXECUTION_MODE = "deterministic_offline"
@@ -158,9 +161,54 @@ class Envelope:
 
 class OperationError(Exception):
     def __init__(self, code: str, message: str, *, details: dict[str, object] | None = None,
-                 retryable: bool = False) -> None:
+                 retryable: bool = False, blocked: bool = False) -> None:
         super().__init__(message)
         self.info = ErrorInfo(code, message, retryable, details or {})
+        self.blocked = blocked
+
+
+def workspace_root() -> Path:
+    """Directory that ``train`` may write under: ``$MLOPS_PIPELINE_WORKSPACE`` or the CWD.
+
+    The root itself is resolved (symlinks and ``..`` removed) and must exist.
+    """
+    configured = os.environ.get(WORKSPACE_ENV)
+    root = Path(configured) if configured else Path.cwd()
+    try:
+        resolved = root.resolve(strict=True)
+    except OSError as error:
+        raise OperationError(
+            "WORKSPACE_UNAVAILABLE", f"{WORKSPACE_ENV} does not name an existing directory"
+        ) from error
+    if not resolved.is_dir():
+        raise OperationError(
+            "WORKSPACE_UNAVAILABLE", f"{WORKSPACE_ENV} does not name an existing directory"
+        )
+    return resolved
+
+
+def _blocked_path() -> OperationError:
+    # The resolved path is deliberately not echoed back to the caller.
+    return OperationError(
+        "PATH_OUTSIDE_WORKSPACE",
+        "output_dir resolves outside the configured workspace root",
+        blocked=True,
+    )
+
+
+def confine_to_workspace(output_dir: str, root: Path) -> Path:
+    """Resolve ``output_dir`` (relative paths are relative to ``root``) and require it
+    to be ``root`` or a descendant after symlink and ``..`` resolution."""
+    candidate = Path(output_dir)
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    try:
+        resolved = candidate.resolve(strict=False)
+    except (OSError, RuntimeError) as error:  # e.g. symlink loops
+        raise _blocked_path() from error
+    if resolved != root and root not in resolved.parents:
+        raise _blocked_path()
+    return resolved
 
 
 def _invalid(message: str, **details: object) -> OperationError:
@@ -302,9 +350,15 @@ def _op_train(payload: Mapping[str, object]) -> OpResult:
     output_dir = payload["output_dir"]
     if not isinstance(output_dir, str) or not output_dir.strip() or "\x00" in output_dir:
         raise _invalid("output_dir must be a non-empty path string")
+    root = workspace_root()
+    target = confine_to_workspace(output_dir, root)
     result = _run_experiment(payload)
     try:
-        written = write_run_outputs(result, output_dir)
+        target.mkdir(parents=True, exist_ok=True)
+        # Re-check after creating directories: a path component may have been
+        # swapped for a symlink between the first check and mkdir.
+        target = confine_to_workspace(str(target), root)
+        written = write_run_outputs(result, target)
     except FileExistsError as error:
         raise OperationError("ARTIFACT_CONFLICT", str(error)) from error
     except OSError as error:
@@ -491,6 +545,7 @@ def run_operation(
     clock = time.perf_counter()
     trace_id, span_id = secrets.token_hex(16), secrets.token_hex(8)
     error: ErrorInfo | None = None
+    blocked = False
     data: object = None
     provenance: list[Provenance] = []
 
@@ -519,6 +574,7 @@ def run_operation(
             data, provenance = spec.handler(payload)
         except OperationError as failure:
             error = failure.info
+            blocked = failure.blocked
         except Exception as failure:  # noqa: BLE001 - surfaced as a contract error
             error = ErrorInfo(
                 "INTERNAL_ERROR",
@@ -534,11 +590,11 @@ def run_operation(
         correlation_id=resolved_correlation,
         trace_id=trace_id,
         span_id=span_id,
-        status="ok" if error is None else "error",
+        status="ok" if error is None else ("blocked" if blocked else "error"),
         data=data,
         error=error,
         provenance=tuple(provenance),
-        policy=None,
+        policy={"decision": "deny", "reasons": [error.message]} if blocked and error else None,
         started_at=started_at,
         duration_ms=round((time.perf_counter() - clock) * 1000.0, 3),
     )

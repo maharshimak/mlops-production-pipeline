@@ -27,7 +27,11 @@ All operations are deterministic arithmetic over the payload and report `executi
 | `model_card` | `run_record` | `model_id`, `record_sha256`, `markdown` | record |
 | `evaluate_drift` | `schema`, `reference_records`, `current_records`, optional `bins`, `max_psi` | per-feature `psi`, bin counts, `exceeds_threshold`, `drift_detected`, both sample hashes | both datasets |
 
-`train` writes `model.json` and `run_record.json` with exclusive-create semantics. Re-running with identical outputs is idempotent (`created: false`); different existing content returns `ARTIFACT_CONFLICT` and leaves the files untouched. After writing, both files are re-read and their SHA-256 compared with the in-memory bytes (`verified`). `output_dir` is a caller-chosen local path; callers that accept it from untrusted sources must restrict it themselves.
+`train` writes `model.json` and `run_record.json` with exclusive-create semantics. Re-running with identical outputs is idempotent (`created: false`); different existing content returns `ARTIFACT_CONFLICT` and leaves the files untouched. After writing, both files are re-read and their SHA-256 compared with the in-memory bytes (`verified`). ### Workspace confinement for `train`
+
+`train` writes only under a workspace root: the directory named by the `MLOPS_PIPELINE_WORKSPACE` environment variable, or the current working directory when it is unset. The root must exist. A relative `output_dir` is interpreted relative to the root. The target is resolved (symlinks, Windows junctions and `..` removed) and must be the root or a descendant of it; otherwise the envelope has `status: "blocked"`, `error.code: "PATH_OUTSIDE_WORKSPACE"`, `policy: {"decision": "deny", ...}`, `data: null`, and nothing is created or written. The check runs before any training work and again after the output directory is created. The resolved path is not echoed back in the error.
+
+Residual risk: a process that can modify the workspace concurrently could still swap a directory for a link between the final check and the file writes; the confinement protects against payload-chosen paths, not against a hostile local process.
 
 `evaluate_drift` validates both samples with `require_label=False`, so current production samples do not need labels.
 
@@ -36,6 +40,8 @@ All operations are deterministic arithmetic over the payload and report `executi
 | Code | When |
 | --- | --- |
 | `UNKNOWN_OPERATION` | operation name not in `capabilities()` |
+| `PATH_OUTSIDE_WORKSPACE` | `train` `output_dir` resolves outside the workspace root; `status` is `blocked` |
+| `WORKSPACE_UNAVAILABLE` | `MLOPS_PIPELINE_WORKSPACE` (or the CWD) is not an existing directory |
 | `INVALID_INPUT` | payload not an object, missing/unknown fields, bad schema/config/code_version, invalid or tampered `run_record`, invalid ids |
 | `DATASET_INVALID` | records fail validation; `error.details.report` holds the validation report |
 | `TRAINING_FAILED` | fitting or evaluation fails (for example a singular system with `ridge = 0`) |

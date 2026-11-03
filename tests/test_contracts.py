@@ -87,7 +87,8 @@ def test_evaluate_candidate_returns_control_plane_export() -> None:
     }
 
 
-def test_train_writes_verified_artifact_and_refuses_conflicts(tmp_path) -> None:
+def test_train_writes_verified_artifact_and_refuses_conflicts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MLOPS_PIPELINE_WORKSPACE", str(tmp_path))
     out = tmp_path / "candidate"
     envelope = check(run_operation("train", payload(output_dir=str(out), code_version="v1")))
     data = envelope["data"]

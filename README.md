@@ -70,7 +70,7 @@ In addition to the original dependency-light single-feature baseline, `run_tabul
 | Operation | Side effects | Returns in `data` |
 | --- | --- | --- |
 | `validate_dataset` | none | validation report including `dataset_sha256` |
-| `train` | writes `model.json` and `run_record.json` to `output_dir` (never overwrites different content) | paths, `verified`, `created`, run record |
+| `train` | writes `model.json` and `run_record.json` to `output_dir`, confined to `MLOPS_PIPELINE_WORKSPACE` (default: CWD); paths outside are `blocked`; never overwrites different content | paths, `verified`, `created`, run record |
 | `evaluate_candidate` | none | control-plane `candidate` export and run record |
 | `model_card` | none | Markdown model card for a verified run record |
 | `evaluate_drift` | none | per-feature PSI between reference and (optionally unlabelled) current samples |

@@ -10,6 +10,7 @@ The format follows the intent of [Keep a Changelog](https://keepachangelog.com/)
 - Record-oriented dataset validation and canonical SHA-256 dataset versions (`datasets`).
 - Group-aware deterministic train/test splits (`splits`) and reference-fitted per-feature PSI (`drift`).
 - Reproducible run records, model artifacts and verified local outputs (`experiment`), model cards rendered from verified records (`model_card`) and the `mlops-candidate-evaluation.v1` export.
+- `train` operation confines `output_dir` to `MLOPS_PIPELINE_WORKSPACE` (default: current directory) after resolving symlinks and `..`; outside paths return `status: "blocked"` / `PATH_OUTSIDE_WORKSPACE` without writing.
 - `makma.v1` envelope with `validate_dataset`, `train`, `evaluate_candidate`, `model_card` and `evaluate_drift` operations (`contracts`).
 
 ### Fixed
